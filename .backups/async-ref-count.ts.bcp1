@@ -1,0 +1,152 @@
+import { Abortable, abortify } from '@xstd/abortable';
+
+export interface OpenSharedValue<GShared extends AsyncDisposable> {
+  (signal: AbortSignal): PromiseLike<GShared> | GShared;
+}
+
+export interface AsyncRefCountCloseHook {
+  (close: AsyncRefCountCloseHookClose, signal: AbortSignal): void;
+}
+
+export type AsyncRefCountCloseHookClose = Omit<PromiseWithResolvers<void>, 'promise'>;
+
+// export interface AsyncRefCountCloseHookClose {
+//   (): void;
+// }
+
+export interface AsyncRefCountOptions {
+  readonly closeHook?: AsyncRefCountCloseHook;
+}
+
+export class AsyncRefCount<GShared extends AsyncDisposable> {
+  static readonly defaultCloseHook: AsyncRefCountCloseHook = ({
+    resolve,
+  }: AsyncRefCountCloseHookClose): void => {
+    resolve();
+  };
+
+  readonly #open: OpenSharedValue<GShared>;
+  readonly #closeHook: AsyncRefCountCloseHook;
+
+  #count: number;
+
+  #openController: AbortController | undefined;
+  #openPromise: Promise<GShared> | undefined;
+
+  #closeHookController: AbortController | undefined;
+  #closePromise: Promise<void> | undefined;
+
+  constructor(
+    open: OpenSharedValue<GShared>,
+    { closeHook = AsyncRefCount.defaultCloseHook }: AsyncRefCountOptions = {},
+  ) {
+    this.#open = open;
+    this.#closeHook = closeHook;
+    this.#count = 0;
+  }
+
+  async open({ signal }: Abortable = {}): Promise<SharedAsyncRefCount<GShared>> {
+    signal?.throwIfAborted();
+
+    if (this.#closeHookController !== undefined) {
+      this.#closeHookController.abort();
+      this.#closeHookController = undefined;
+    }
+
+    if (this.#closePromise !== undefined) {
+      await abortify(
+        this.#closePromise.catch((): void => {}),
+        { signal },
+      );
+    }
+
+    this.#count++;
+
+    if (this.#count === 1) {
+      const openController: AbortController = new AbortController();
+      this.#openController = openController;
+      this.#openPromise = Promise.try(this.#open, openController.signal).finally((): void => {
+        openController.abort();
+        if (this.#openController === openController) {
+          this.#openController = undefined;
+        }
+      }) /*
+        .then((shared: GShared): GShared => {
+
+        })*/;
+    }
+
+    try {
+      return new SharedAsyncRefCount<GShared>(
+        await abortify(this.#openPromise!, {
+          signal,
+        }),
+        async (): Promise<void> => {
+          this.#count--;
+
+          if (this.#count === 0) {
+            const { promise, resolve, reject } = Promise.withResolvers<void>();
+            const closeHookController: AbortController = new AbortController();
+            this.#closeHookController = closeHookController;
+            this.#closePromise = promise;
+
+            try {
+              this.#closeHook({ resolve, reject }, closeHookController.signal);
+            } catch (error: unknown) {
+              reject(error);
+            }
+
+            try {
+              await promise;
+            } finally {
+              closeHookController.abort();
+              if (this.#closeHookController === closeHookController) {
+                this.#closeHookController = undefined;
+              }
+              this.#closePromise = undefined;
+            }
+          }
+        },
+      );
+    } catch (error: unknown) {
+      // TODO
+    }
+    // const result: Result<GShared> = await promiseResult(
+    //   abortify(this.#openPromise!, {
+    //     signal,
+    //   }),
+    // );
+    //
+    // if (isEr)
+  }
+}
+
+/*--------*/
+
+export interface DisposeOfSharedAsyncRefCount {
+  (): Promise<void>;
+}
+
+export class SharedAsyncRefCount<GShared extends AsyncDisposable> implements AsyncDisposable {
+  readonly #shared: GShared;
+  readonly #dispose: DisposeOfSharedAsyncRefCount;
+  #disposed: boolean;
+
+  constructor(shared: GShared, dispose: DisposeOfSharedAsyncRefCount) {
+    this.#shared = shared;
+    this.#dispose = dispose;
+    this.#disposed = false;
+  }
+
+  get shared(): GShared {
+    return this.#shared;
+  }
+
+  [Symbol.asyncDispose](): Promise<void> {
+    if (this.#disposed) {
+      return Promise.reject(new Error('Already disposed.'));
+    }
+    this.#disposed = true;
+    return this.#dispose();
+  }
+}

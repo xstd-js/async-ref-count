@@ -1,0 +1,43 @@
+{
+  "name": "@xstd/async-ref-count",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./index.js",
+  "scripts": {
+    "fb:build": "node fabrique/actions/cli/build.cli.js",
+    "fb:format": "prettier --write --ignore-unknown --config ./.prettierrc \"src/**/*.{js,jsx,ts,tsx,html,css,scss}\"",
+    "fb:test": "vitest",
+    "fb:test:coverage": "vitest run --coverage",
+    "fb:bench": "vitest bench",
+    "fb:typedoc": "typedoc --options typedoc.json --tsconfig tsconfig.json",
+    "fb:prod": "node fabrique/actions/cli/build-and-publish.cli.js --mode prod",
+    "fb:dev": "node fabrique/actions/cli/build-and-publish.cli.js --mode dev",
+    "fb:rc": "node fabrique/actions/cli/build-and-publish.cli.js --mode rc"
+  },
+  "description": "Description An asynchronous ref counter used to share disposable values",
+  "keywords": [],
+  "author": "Valentin Richard",
+  "license": "MIT",
+  "access": "public",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xstd-js/async-ref-count.git"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@vitest/coverage-istanbul": "^4.0.14",
+    "prettier": "^3.7.1",
+    "prettier-plugin-organize-imports": "^4.3.0",
+    "typedoc": "^0.28.14",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  },
+  "packageManager": "yarn@4.12.0",
+  "fabrique": {
+    "version": "1.0.19",
+    "type": "lib"
+  },
+  "dependencies": {
+    "@xstd/abortable": "^1.2.3"
+  }
+}

@@ -1,0 +1,33 @@
+/**
+ * @deprecated
+ */
+export interface DisposeOfSharedAsyncRefCount {
+  (): Promise<void>;
+}
+
+/**
+ * @deprecated
+ */
+export class SharedAsyncRefCount<GShared> implements AsyncDisposable {
+  readonly #shared: GShared;
+  readonly #dispose: DisposeOfSharedAsyncRefCount;
+  #disposed: boolean;
+
+  constructor(shared: GShared, dispose: DisposeOfSharedAsyncRefCount) {
+    this.#shared = shared;
+    this.#dispose = dispose;
+    this.#disposed = false;
+  }
+
+  get shared(): GShared {
+    return this.#shared;
+  }
+
+  [Symbol.asyncDispose](): Promise<void> {
+    if (this.#disposed) {
+      return Promise.reject(new Error('Already disposed.'));
+    }
+    this.#disposed = true;
+    return this.#dispose();
+  }
+}
