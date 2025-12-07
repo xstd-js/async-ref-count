@@ -1,6 +1,6 @@
 {
   "name": "@xstd/async-ref-count",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "main": "./index.js",
   "scripts": {
@@ -14,7 +14,7 @@
     "fb:dev": "node fabrique/actions/cli/build-and-publish.cli.js --mode dev",
     "fb:rc": "node fabrique/actions/cli/build-and-publish.cli.js --mode rc"
   },
-  "description": "Description An asynchronous ref counter used to share disposable values",
+  "description": "An asynchronous ref counter used to share disposable values",
   "keywords": [],
   "author": "Valentin Richard",
   "license": "MIT",

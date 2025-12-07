@@ -1,0 +1,270 @@
+import { type Abortable, abortify } from '@xstd/abortable';
+import type { Result } from '@xstd/enum';
+import { isResultErr, isResultOk, promiseResult } from '@xstd/enum';
+import { ResourceFactory } from '../../factory/resource-factory.js';
+import { type OpenResource } from '../../factory/types/open-resource.js';
+import { type Resource } from '../../resource/resource.js';
+import { type HavingMaintainAliveOption } from './maintain-alive-option/having-maintain-alive-option.js';
+import { resolveMaintainAliveOption } from './maintain-alive-option/helpers/resolve-maintain-alive-option.js';
+
+/**
+ * @deprecated
+ */
+export interface RefCountResourceFactoryOptions<
+  GSharedResource extends Resource,
+  GRefContResource extends Resource,
+> extends HavingMaintainAliveOption {
+  readonly open: OpenResource<[], GSharedResource> | ResourceFactory<[], GSharedResource>;
+  readonly create: CreateRefCountResource<GSharedResource, GRefContResource>;
+}
+
+/**
+ * @deprecated
+ */
+export interface CloseRefCountResource {
+  (reason: unknown): Promise<void>;
+}
+
+/**
+ * @deprecated
+ */
+export interface CreateRefCountResource<
+  GSharedResource extends Resource,
+  GRefContResource extends Resource,
+> {
+  (sharedResource: GSharedResource, close: CloseRefCountResource): GRefContResource;
+}
+
+/**
+ * @deprecated
+ */
+export class RefCountResourceFactory<
+  GSharedResource extends Resource,
+  GRefContResource extends Resource,
+> extends ResourceFactory<[], GRefContResource> {
+  constructor({
+    open,
+    create,
+    maintainAlive = 0,
+  }: RefCountResourceFactoryOptions<GSharedResource, GRefContResource>) {
+    if (typeof open === 'function') {
+      open = new ResourceFactory<[], GSharedResource>(open);
+    }
+
+    type SharedResourceWithCloseRefCount = readonly [GSharedResource, CloseRefCountResource];
+
+    let consumers: number = 0;
+    let openController: AbortController | undefined;
+    let openPromise: Promise<SharedResourceWithCloseRefCount> | undefined;
+    let closePromise: Promise<void> | undefined;
+    let maintainAliveTimer: any | undefined;
+
+    // const close = async (reason: unknown): Promise<void> => {
+    //   if (openController === undefined) {
+    //     // sharedResource opened
+    //   } else {
+    //     // sharedResource not opened
+    //     openController.abort(reason);
+    //     openController = undefined;
+    //   }
+    //
+    //   const { promise, resolve } = Promise.withResolvers<void>();
+    //   closePromise = promise;
+    //
+    //   try {
+    //     await sharedResource!.close();
+    //   } finally {
+    //     sharedResource = undefined;
+    //     closePromise = undefined;
+    //     resolve();
+    //   }
+    // };
+
+    // const openConsumer = async ({ signal }: Abortable = {}): Promise<GSharedResource> => {
+    //   signal?.throwIfAborted();
+    //
+    //   consumers++;
+    //
+    //   if (openPromise === undefined /* consumers === 1 */) {
+    //     const controller: AbortController = new AbortController();
+    //     openController = controller;
+    //     openPromise = open.open({ signal: controller.signal }).finally((): void => {
+    //       controller.abort();
+    //       if (openController === controller) {
+    //         openController = undefined;
+    //       }
+    //     });
+    //   }
+    //
+    //   const result: Result<GSharedResource> = await promiseResult(
+    //     abortify(openPromise, {
+    //       signal,
+    //     }),
+    //   );
+    //
+    //   // if (signal?.aborted) {
+    //   //
+    //   // } else {
+    //   //
+    //   // }
+    //   if (isResultOk<GSharedResource>(result)) {
+    //     return result.value;
+    //   } else {
+    //     consumers--;
+    //
+    //     if (consumers === 0) {
+    //     }
+    //   }
+    //
+    //   // return abortify<GSharedResource>(openPromise, {
+    //   //   signal,
+    //   // });
+    // };
+
+    // const closeConsumer: CloseRefCountResource = async (reason?: unknown): Promise<void> => {
+    //   consumers--;
+    //
+    //   const maintainAliveValue: number = resolveMaintainAliveOption(maintainAlive);
+    //
+    //   if (consumers === 0) {
+    //     if (maintainAliveValue <= 0) {
+    //       await close(reason);
+    //     } else {
+    //       maintainAliveTimer = setTimeout((): void => {
+    //         maintainAliveTimer = undefined;
+    //         close(reason).catch(reportError);
+    //       }, maintainAliveValue);
+    //     }
+    //   }
+    // };
+
+    let close: CloseRefCountResource;
+
+    super(async ({ signal }: Abortable = {}): Promise<GRefContResource> => {
+      signal?.throwIfAborted();
+
+      if (maintainAliveTimer !== undefined) {
+        clearTimeout(maintainAliveTimer);
+        maintainAliveTimer = undefined;
+      }
+
+      if (closePromise !== undefined) {
+        await abortify(closePromise, { signal });
+      }
+
+      consumers++;
+
+      if (openPromise === undefined /* consumers === 1 */) {
+        // close = async (reason: unknown): Promise<void> => {
+        //   consumers--;
+        // };
+
+        const controller: AbortController = new AbortController();
+        openController = controller;
+        openPromise = open
+          .open({ signal: controller.signal })
+          .finally((): void => {
+            controller.abort();
+            if (openController === controller) {
+              openController = undefined;
+            }
+          })
+          .then((sharedResource: GSharedResource): SharedResourceWithCloseRefCount => {
+            sharedResource.closeSignal.addEventListener('abort', (): void => {
+              consumers--;
+            });
+
+            const closeSharedResource = async (reason: unknown): Promise<void> => {
+              const { promise, resolve } = Promise.withResolvers<void>();
+              closePromise = promise;
+
+              try {
+                await sharedResource.close(reason);
+              } finally {
+                closePromise = undefined;
+                resolve();
+              }
+            };
+
+            close = async (reason: unknown): Promise<void> => {
+              consumers--;
+
+              if (consumers === 0) {
+                const maintainAliveValue: number = resolveMaintainAliveOption(maintainAlive);
+
+                if (maintainAliveValue <= 0) {
+                  await closeSharedResource(reason);
+                } else if (Number.isFinite(maintainAliveValue)) {
+                  maintainAliveTimer = setTimeout((): void => {
+                    maintainAliveTimer = undefined;
+                    closeSharedResource(reason).catch(reportError);
+                  }, maintainAliveValue);
+                }
+              }
+            };
+
+            return sharedResource;
+          });
+      }
+
+      const result: Result<GSharedResource> = await promiseResult(
+        abortify(openPromise, {
+          signal,
+        }),
+      );
+
+      if (isResultErr(result)) {
+        await close(result.error);
+      }
+
+      // if (signal?.aborted) {
+      //
+      // } else {
+      //
+      // }
+      if (isResultOk<GSharedResource>(result)) {
+        // TODO
+        // return result.value;
+      } else {
+      }
+
+      // const result: Result<GSharedResource> = await promiseResult(
+      //   abortify(openPromise, {
+      //     signal,
+      //   }),
+      // );
+      //
+      // if (isResultOk<GSharedResource>(result)) {
+      //   try {
+      //     return create(result.value, closeConsumer);
+      //   } catch (error: unknown) {
+      //     // TODO
+      //   }
+      // } else {
+      // }
+      // try {
+      //   await abortify(openPromise!, {
+      //     signal,
+      //   });
+      // } catch (error: unknown) {
+      //   consumers--;
+      // }
+
+      // try {
+      //   await abortify(openPromise!, {
+      //     signal,
+      //   });
+      //
+      //   return create(sharedResource!, refCountClose);
+      // } catch (error: unknown) {
+      //   try {
+      //     await refCountClose(error);
+      //   } catch (_error: unknown) {
+      //     throw new SuppressedError(error, _error);
+      //   }
+      //
+      //   throw error;
+      // }
+    });
+  }
+}

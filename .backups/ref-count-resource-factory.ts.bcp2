@@ -1,0 +1,148 @@
+import { type Abortable, abortify } from '@xstd/abortable';
+import { ResourceFactory } from '../../factory/resource-factory.js';
+import { type OpenResource } from '../../factory/types/open-resource.js';
+import { type Resource } from '../../resource/resource.js';
+import { type HavingMaintainAliveOption } from './maintain-alive-option/having-maintain-alive-option.js';
+import { resolveMaintainAliveOption } from './maintain-alive-option/helpers/resolve-maintain-alive-option.js';
+
+export interface RefCountResourceFactoryOptions<
+  GSharedResource extends Resource,
+  GRefContResource extends Resource,
+> extends HavingMaintainAliveOption {
+  readonly open: OpenResource<[], GSharedResource> | ResourceFactory<[], GSharedResource>;
+  readonly create: CreateRefCountResource<GSharedResource, GRefContResource>;
+}
+
+export interface CloseRefCountResource {
+  (reason: unknown): Promise<void>;
+}
+
+export interface CreateRefCountResource<
+  GSharedResource extends Resource,
+  GRefContResource extends Resource,
+> {
+  (sharedResource: GSharedResource, close: CloseRefCountResource): GRefContResource;
+}
+
+export class RefCountResourceFactory<
+  GSharedResource extends Resource,
+  GRefContResource extends Resource,
+> extends ResourceFactory<[], GRefContResource> {
+  constructor({
+    open,
+    create,
+    maintainAlive = 0,
+  }: RefCountResourceFactoryOptions<GSharedResource, GRefContResource>) {
+    if (typeof open === 'function') {
+      open = new ResourceFactory<[], GSharedResource>(open);
+    }
+
+    let consumers: number = 0;
+    let openController: AbortController | undefined;
+    let openPromise: Promise<void> | undefined;
+    let sharedResource: GSharedResource | undefined;
+    let closePromise: Promise<void> | undefined;
+    let maintainAliveTimer: any | undefined;
+
+    const close = async (reason: unknown): Promise<void> => {
+      if (openController === undefined) {
+        // sharedResource opened
+        } else {
+        // sharedResource not opened
+        openController.abort(reason);
+        openController = undefined;
+      }
+
+      const { promise, resolve } = Promise.withResolvers<void>();
+      closePromise = promise;
+
+      try {
+        await sharedResource!.close();
+      } finally {
+        sharedResource = undefined;
+        closePromise = undefined;
+        resolve();
+      }
+    };
+
+    const refCountClose: CloseRefCountResource = async (reason?: unknown): Promise<void> => {
+      consumers--;
+
+      const maintainAliveValue: number = resolveMaintainAliveOption(maintainAlive);
+
+      if (consumers === 0) {
+        if (maintainAliveValue <= 0) {
+          await close(reason);
+        } else {
+          maintainAliveTimer = setTimeout((): void => {
+            maintainAliveTimer = undefined;
+            close(reason).catch(reportError);
+          }, maintainAliveValue);
+        }
+      }
+    };
+
+    super(async ({ signal }: Abortable = {}): Promise<GRefContResource> => {
+      signal?.throwIfAborted();
+
+      if (maintainAliveTimer !== undefined) {
+        clearTimeout(maintainAliveTimer);
+        maintainAliveTimer = undefined;
+      }
+
+      if (closePromise !== undefined) {
+        await abortify(closePromise, { signal });
+      }
+
+      consumers++;
+
+      if (consumers === 1) {
+        const controller: AbortController = new AbortController();
+        openController = controller;
+        openPromise = open
+          .open({ signal: controller.signal })
+          .then(
+            (resource: GSharedResource): void => {
+              controller.signal.throwIfAborted();
+              sharedResource = resource;
+            },
+            (error: unknown): never => {
+              controller.signal.throwIfAborted();
+              sharedResource = undefined;
+              throw error;
+            },
+          )
+          .finally((): void => {
+            controller.abort();
+            if (openController === controller) {
+              openController = undefined;
+            }
+          });
+      }
+
+      try {
+        await abortify(openPromise!, {
+          signal,
+        });
+      } catch (error: unknown) {
+        consumers--;
+      }
+
+      // try {
+      //   await abortify(openPromise!, {
+      //     signal,
+      //   });
+      //
+      //   return create(sharedResource!, refCountClose);
+      // } catch (error: unknown) {
+      //   try {
+      //     await refCountClose(error);
+      //   } catch (_error: unknown) {
+      //     throw new SuppressedError(error, _error);
+      //   }
+      //
+      //   throw error;
+      // }
+    });
+  }
+}
