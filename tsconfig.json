@@ -26,17 +26,21 @@
     "resolveJsonModule": true,
     "sourceMap": true,
     "stripInternal": false,
-    "preserveConstEnums": false,
+    "preserveConstEnums": true,
     "alwaysStrict": true,
 
     /* Mode */
     "esModuleInterop": true,
     "moduleResolution": "NodeNext",
-    "allowImportingTsExtensions": false,
     "isolatedModules": false,
     "moduleDetection": "force",
     "noEmit": false,
+
+    /* Import */
+    "allowImportingTsExtensions": true,
     "allowSyntheticDefaultImports": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true,
 
     /* Linting */
     "strict": true,
@@ -57,6 +61,7 @@
     "strictFunctionTypes": true,
     "strictNullChecks": true,
     "strictPropertyInitialization": true,
+    "erasableSyntaxOnly": true,
   },
   "include": [
     "src/**/*.ts"

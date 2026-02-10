@@ -3,10 +3,11 @@ import { join, relative, resolve } from 'node:path';
 import process from 'node:process';
 
 /**
- * Runs "command" into the terminal.
+ * Recursively explore a directory and yield all files.
+ *
  * @param {string} path
  * @param {{relativeTo?: string; pick?: (path: string, type: { isFile: boolean; isDirectory: boolean; }) => boolean; }?} options
- * @return {AsyncGenerator<string>}
+ * @returns {AsyncGenerator<string>} A generator that yields all files (path) in the directory.
  */
 export async function* exploreDirectoryFiles(path, options) {
   const dir = await opendir(resolve(process.cwd(), path));

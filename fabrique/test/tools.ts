@@ -1,9 +1,28 @@
-export namespace testTools {
-  export function sleep(t: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, t));
+export class TestTools {
+  static sleep(duration: number, signal?: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve: () => void, reject: (reason?: unknown) => void): void => {
+      signal?.throwIfAborted();
+
+      const end = (): void => {
+        signal?.removeEventListener('abort', onAbort);
+        clearTimeout(timer);
+      };
+
+      const onAbort = (): void => {
+        end();
+        reject(signal!.reason);
+      };
+
+      signal?.addEventListener('abort', onAbort);
+
+      const timer: any = setTimeout((): void => {
+        end();
+        resolve();
+      }, duration);
+    });
   }
 
-  export function polyfillRequestIdleCallback(): void {
+  static polyfillRequestIdleCallback(): void {
     globalThis.requestIdleCallback ??= (
       callback: IdleRequestCallback,
       { timeout = 0 }: IdleRequestOptions = {},
@@ -16,7 +35,7 @@ export namespace testTools {
     };
   }
 
-  export function gc(): void {
+  static gc(): void {
     if (typeof (globalThis as any).gc === 'function') {
       return (globalThis as any).gc!();
     } else {

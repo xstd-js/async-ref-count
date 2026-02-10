@@ -112,7 +112,7 @@ async function buildTypescript(sourcePath) {
 }
 
 function generateExportEsmLine(path) {
-  return `export * from './${path.replaceAll('\\', '/').slice(0, -3)}.js';\n`;
+  return `export * from './${path.replaceAll('\\', '/').slice(0, -3)}.ts';\n`;
 }
 
 /**

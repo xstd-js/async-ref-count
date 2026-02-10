@@ -159,3 +159,6 @@ dist
 /tmp
 /out-tsc
 
+# misc
+.keys/
+.db/

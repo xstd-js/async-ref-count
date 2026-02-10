@@ -2,35 +2,49 @@
 
 This projet is open to everyone. Feel free to test the library, share it, improve it, and create merge requests.
 
-### Getting started
+## Getting started
 
-The library requires [Node.js](https://nodejs.org/en) `22+` and [yarn](https://yarnpkg.com/).
+### Tools
 
-First, we have to use the correct version of node:
+#### [nvm](https://github.com/nvm-sh/nvm)
+
+We recommend using [nvm](https://github.com/nvm-sh/nvm) to manage your Node.js versions.
+
+```shell
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+```
+
+#### [Node](https://nodejs.org)
 
 ```shell
 nvm use
+
+# Verify the Node.js version:
+node -v
 ```
 
-If you don't have [nvm](https://github.com/nvm-sh/nvm), you may manually install and use Node.js 22+.
-
-Then, we have to use the proper package manager (here `yarn`):
+#### [Yarn](https://yarnpkg.com)
 
 ```shell
-corepack enable
-```
+corepack enable yarn
 
-Start a local verdaccio:
+# Verify Yarn version:
+yarn -v
 
-```shell
-npx fabrique verdaccio
-```
-
-And install the dependencies:
-
-```shell
+# Install the dependencies:
 yarn install
 ```
+
+### Environment variables
+
+```shell
+# Copy the example file into .env:
+cp .env.example .env
+```
+
+And replace the corresponding variables:
+
+- [NPM_TOKEN](https://docs.npmjs.com/creating-and-viewing-access-tokens)
 
 ### Code
 

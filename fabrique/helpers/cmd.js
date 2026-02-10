@@ -3,9 +3,11 @@ import process from 'node:process';
 
 /**
  * Runs "command" into the terminal.
+ *
  * @param {string} command
  * @param {readonly string[]} args
  * @param {SpawnOptions | undefined} options
+ * @return {Promise<void>} A Promise that resolves when the command exits (ends with code 0) or rejects if the command fails.
  */
 export async function cmd(command, args = [], options) {
   return new Promise((resolve, reject) => {
