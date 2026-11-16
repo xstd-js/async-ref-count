@@ -1,0 +1,4 @@
+# Agent workflow assets (installed skills, agent docs) — not product source,
+# reformatted wholesale on skill updates; exempt from the package's format check
+.agents/
+docs/agents/

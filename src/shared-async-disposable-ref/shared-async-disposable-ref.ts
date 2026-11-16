@@ -16,6 +16,10 @@ export class SharedAsyncDisposableRef<GValue> {
     return this.#value;
   }
 
+  get closed(): boolean {
+    return this.#closePromise !== undefined;
+  }
+
   close(reason?: unknown): Promise<void> {
     if (this.#closePromise === undefined) {
       this.#closePromise = Promise.try(this.#close, reason);

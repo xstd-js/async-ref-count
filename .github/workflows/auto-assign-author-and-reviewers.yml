@@ -1,0 +1,16 @@
+# https://github.com/marketplace/actions/auto-assign-action
+
+name: Auto Assign Author/Reviewers
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+jobs:
+  auto-assign-author-and-reviewers:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write          # add assignees
+      pull-requests: write   # request reviewers
+    steps:
+      - uses: kentaro-m/auto-assign-action@v2.0.2

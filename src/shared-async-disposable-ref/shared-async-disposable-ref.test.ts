@@ -16,6 +16,7 @@ describe('SharedAsyncDisposableRef', () => {
 
     await shared.close();
     expect(closed).toBe(1);
+    expect(shared.closed).toBe(true);
   });
 
   it('should be async disposable', async () => {
@@ -35,7 +36,7 @@ describe('SharedAsyncDisposableRef', () => {
     expect(closed).toBe(1);
   });
 
-  it('should support concurent close', async () => {
+  it('should support concurrent close', async () => {
     const shared = new SharedAsyncDisposableRef(42, async () => {});
 
     await expect(Promise.all([shared.close(), shared.close()])).resolves.toBeDefined();
