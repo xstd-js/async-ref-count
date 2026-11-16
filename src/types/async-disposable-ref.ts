@@ -12,12 +12,13 @@ export interface AsyncDisposableRef<GValue> {
   readonly value: GValue;
 
   /**
-   * A function to "close" this reference.
+   * A function to "close" this reference. Called when the resource is no longer shared.
    */
   readonly close: CloseAsyncDisposableRef;
 
   /**
-   * A function called when a `SharedAsyncDisposableRef` is closed.
+   * An optional function called when a `SharedAsyncDisposableRef` created from this reference
+   * is closed, before the reference itself is closed.
    */
   readonly closeShared?: CloseSharedAsyncDisposableRef;
 }

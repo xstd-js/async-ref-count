@@ -1,9 +1,21 @@
 {
   "name": "@xstd/async-ref-count",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "type": "module",
-  "description": "An asynchronous ref counter used to share disposable values",
-  "keywords": [],
+  "description": "An asynchronous ref counter used to open a resource only once and share it multiple times",
+  "keywords": [
+    "async",
+    "asynchronous",
+    "ref-count",
+    "reference-counting",
+    "disposable",
+    "resource",
+    "resource-management",
+    "shared",
+    "abort",
+    "abortable",
+    "typescript"
+  ],
   "author": "Valentin Richard",
   "license": "MIT",
   "repository": {
@@ -45,8 +57,7 @@
   "access": "public",
   "dependencies": {
     "@xstd/abortable": "^1.2.3",
-    "@xstd/block": "^1.0.0",
-    "@xstd/enum": "^1.1.0"
+    "@xstd/block": "^1.0.0"
   },
   "fabrique": {
     "version": "2.0.36",
