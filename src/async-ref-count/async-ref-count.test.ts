@@ -1,6 +1,7 @@
 import { abortify } from '@xstd/abortable';
 import { describe, expect, it, test, vi } from 'vitest';
 import { TestTools } from '../../fabrique/test/tools.ts';
+import { OpenAbortError } from '../open-abort-error/open-abort-error.ts';
 import type { SharedAsyncDisposableRef } from '../shared-async-disposable-ref/shared-async-disposable-ref.ts';
 import { AsyncRefCount } from './async-ref-count.ts';
 
@@ -41,12 +42,12 @@ describe('AsyncRefCount', () => {
     expect(closed).toBe(0);
     expect(closeReason).toBeUndefined();
 
-    // 3) close B => A should still be opened as well as the initial reference
+    // 3) close A => A should still be opened as well as the initial reference
     await sharedB.close();
     expect(opened).toBe(1);
     expect(closed).toBe(0);
 
-    // 4) close B => A and B should be closed, and the "initial reference" should be closed as well
+    // 4) close A => A and B should be closed, and the "initial reference" should be closed as well
     await sharedA.close('close reason');
     expect(opened).toBe(1);
     expect(closed).toBe(1);
@@ -75,6 +76,159 @@ describe('AsyncRefCount', () => {
     // EXPECTED: the open promise should be rejected with the error
     await expect(factory.open()).rejects.toThrow('error');
     expect(opening).toBe(1);
+  });
+
+  it('should retry opening after a failed opening', async () => {
+    let opening: number = 0;
+    let mode: 'fail' | 'succeed' = 'fail';
+
+    const factory = new AsyncRefCount(async () => {
+      opening++;
+
+      if (mode === 'fail') {
+        throw 'error';
+      }
+
+      return {
+        value: 42,
+        close: async () => {},
+      };
+    });
+
+    // 1) open a new shared ref, the opening fails
+    await expect(factory.open()).rejects.toBe('error');
+    expect(opening).toBe(1);
+
+    // 2) open a new shared ref after the failure
+    // EXPECTED: the opening should be retried (the open function should be called again)
+    mode = 'succeed';
+    const shared = await factory.open();
+    // EXPECTED: the shared ref should be fulfilled with the value (not an undefined value)
+    expect(shared.value).toBe(42);
+    expect(opening).toBe(2);
+  });
+
+  it('should not leak the reference count when the opening fails', async () => {
+    let opening: number = 0;
+    let closed: number = 0;
+    let mode: 'fail' | 'succeed' = 'fail';
+
+    const factory = new AsyncRefCount(async () => {
+      opening++;
+
+      if (mode === 'fail') {
+        throw 'error';
+      }
+
+      return {
+        value: 42,
+        close: async () => {
+          closed++;
+        },
+      };
+    });
+
+    // 1) open a new shared ref, the opening fails
+    await expect(factory.open()).rejects.toBe('error');
+    expect(opening).toBe(1);
+
+    // 2) open a new shared ref after the failure, then close it
+    mode = 'succeed';
+    const shared = await factory.open();
+    await shared.close();
+
+    // EXPECTED: the initial reference should be closed: the failed opening
+    // should not have leaked a reference count contribution
+    expect(closed).toBe(1);
+  });
+
+  it('should reject concurrent opens when the opening fails', async () => {
+    let opening: number = 0;
+    let closed: number = 0;
+    let mode: 'fail' | 'succeed' = 'fail';
+
+    const factory = new AsyncRefCount(async () => {
+      opening++;
+
+      if (mode === 'fail') {
+        throw 'error';
+      }
+
+      return {
+        value: 42,
+        close: async () => {
+          closed++;
+        },
+      };
+    });
+
+    // 1) open two shared refs, the opening fails
+    // EXPECTED: the open function should be called only once (no retry loop)
+    const results = await Promise.allSettled([factory.open(), factory.open()]);
+    expect(opening).toBe(1);
+
+    // EXPECTED: both open promises should be rejected with the error
+    expect(results[0].status).toBe('rejected');
+    expect((results[0] as PromiseRejectedResult).reason).toBe('error');
+    expect(results[1].status).toBe('rejected');
+    expect((results[1] as PromiseRejectedResult).reason).toBe('error');
+
+    // 2) open a new shared ref after the failures
+    // EXPECTED: the opening should be retried exactly once (the failed opens should not have leaked reference count contributions)
+    mode = 'succeed';
+    const shared = await factory.open();
+    expect(shared.value).toBe(42);
+    expect(opening).toBe(2);
+
+    // 3) close the shared ref
+    // EXPECTED: the initial reference should be closed
+    await shared.close();
+    expect(closed).toBe(1);
+  });
+
+  it('should support opening after an aborted opening', async () => {
+    let opening: number = 0;
+    let closed: number = 0;
+    let openPromise: PromiseWithResolvers<void> | undefined = undefined;
+
+    const factory = new AsyncRefCount(async (signal: AbortSignal) => {
+      opening++;
+      openPromise = Promise.withResolvers();
+      await abortify(openPromise.promise, { signal });
+
+      return {
+        value: 42,
+        close: async () => {
+          closed++;
+        },
+      };
+    });
+
+    const controller = new AbortController();
+
+    // 1) open a new shared ref with an abort signal
+    const promise = factory.open({ signal: controller.signal });
+    expect(opening).toBe(1);
+
+    // 2) abort the open operation => the open promise rejects with the abort reason
+    controller.abort('error');
+
+    // EXPECTED: the open promise should be rejected with the abort reason
+    await expect(promise).rejects.toBe('error');
+    expect(opening).toBe(1);
+
+    // 3) open a new shared ref without signal
+    // EXPECTED: the opening should be retried
+    const sharedPromise = factory.open();
+    expect(opening).toBe(2);
+    openPromise!.resolve();
+    const shared = await sharedPromise;
+    expect(shared.value).toBe(42);
+
+    // 4) close the shared ref
+    // EXPECTED: the initial reference should be closed
+    await shared.close();
+    expect(closed).toBe(1);
   });
 
   it('should support errors while closing', async () => {
@@ -138,7 +292,7 @@ describe('AsyncRefCount', () => {
     expect(openPromise).toBeUndefined();
   });
 
-  it('should support abortion while opening - with concurent opening', async () => {
+  it('should support abortion while opening - with concurrent opening', async () => {
     let opening: number = 0;
     let opened: number = 0;
     let openPromise: PromiseWithResolvers<void> | undefined = undefined;
@@ -199,26 +353,29 @@ describe('AsyncRefCount', () => {
   });
 
   it('should support abortion while opening - open fulfills', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onError = vi.fn();
 
     let opening: number = 0;
     let opened: number = 0;
     let closed: number = 0;
     let openPromise: PromiseWithResolvers<void> | undefined = undefined;
 
-    const factory = new AsyncRefCount(async () => {
-      opening++;
-      openPromise = Promise.withResolvers();
-      await openPromise.promise;
-      opened++;
+    const factory = new AsyncRefCount(
+      async () => {
+        opening++;
+        openPromise = Promise.withResolvers();
+        await openPromise.promise;
+        opened++;
 
-      return {
-        value: 42,
-        close: async () => {
-          closed++;
-        },
-      };
-    });
+        return {
+          value: 42,
+          close: async () => {
+            closed++;
+          },
+        };
+      },
+      { onError },
+    );
 
     expect(opening).toBe(0);
     expect(opened).toBe(0);
@@ -248,6 +405,44 @@ describe('AsyncRefCount', () => {
     expect(closed).toBe(1);
     expect(openPromise).toBeUndefined();
 
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('should warn on console by default when an unexpected error occurs', async () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    let opening: number = 0;
+    let opened: number = 0;
+    let openPromise: PromiseWithResolvers<void> | undefined = undefined;
+
+    const factory = new AsyncRefCount(async () => {
+      opening++;
+      openPromise = Promise.withResolvers();
+      await openPromise.promise;
+      opened++;
+
+      return {
+        value: 42,
+        close: async () => {},
+      };
+    });
+
+    const controller = new AbortController();
+
+    // 1) open a new shared ref with an abort signal
+    const promise = factory.open({ signal: controller.signal });
+    expect(opening).toBe(1);
+    expect(opened).toBe(0);
+
+    // 2) abort the open operation, BUT resolve the open promise with success instead of rejection
+    controller.abort('error');
+    openPromise!.resolve();
+    openPromise = undefined;
+
+    // EXPECTED: the open promise should be rejected with the abort error
+    await expect(promise).rejects.toThrow('error');
+
+    // EXPECTED: the unexpected error should have been warned on console
     expect(spy).toHaveBeenCalledTimes(1);
 
     vi.restoreAllMocks();
@@ -379,31 +574,34 @@ describe('AsyncRefCount', () => {
     expect(closed).toBe(0);
     expect(closePromise).toBeUndefined();
 
-    // EXPECTED: the shared ref A should have been closed with an error (because it was aborted by the shared ref B opening)
-    await expect(sharedAClosePromise).rejects.toThrow();
+    // EXPECTED: the shared ref A should have been closed with an `OpenAbortError` (because it was aborted by the shared ref B opening)
+    await expect(sharedAClosePromise).rejects.toThrow(OpenAbortError);
   });
 
   it('should await closing any previous task while opening - close is rejected', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onError = vi.fn();
 
     let opened: number = 0;
     let closing: number = 0;
     let closed: number = 0;
     let closePromise: PromiseWithResolvers<void> | undefined = undefined;
 
-    const factory = new AsyncRefCount(async () => {
-      opened++;
+    const factory = new AsyncRefCount(
+      async () => {
+        opened++;
 
-      return {
-        value: 42,
-        close: async () => {
-          closing++;
-          closePromise = Promise.withResolvers();
-          await closePromise.promise;
-          closed++;
-        },
-      };
-    });
+        return {
+          value: 42,
+          close: async () => {
+            closing++;
+            closePromise = Promise.withResolvers();
+            await closePromise.promise;
+            closed++;
+          },
+        };
+      },
+      { onError },
+    );
 
     expect(opened).toBe(0);
     expect(closing).toBe(0);
@@ -448,9 +646,7 @@ describe('AsyncRefCount', () => {
     // EXPECTED: the shared ref A should have been closed with an error (because closing was rejected)
     await expect(sharedAClosePromise).rejects.toThrow('error');
 
-    expect(spy).toHaveBeenCalledTimes(1);
-
-    vi.restoreAllMocks();
+    expect(onError).toHaveBeenCalledTimes(1);
   });
 
   it('should await closing any previous task while opening - open is aborted while closing', async () => {
